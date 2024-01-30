@@ -1,377 +1,306 @@
-// criar um simplificador de expressões
+export type Expression = Variable | Constant | Not | And | Or | Xor | NXor
 
-export type Expression = Variable | Constant | And | Or | Not
+export class Variable {
+  name: string
+  constructor(name: string) {
+    this.name = name
+  }
 
-class Variable {
-  identifier: string
-  isNegated: boolean
+  toString() {
+    return this.name
+  }
 
-  constructor(identifier: string, isNegated?: boolean) {
-    this.identifier = identifier
-    this.isNegated = isNegated || false
+  reduce(): Expression {
+    return this
   }
 }
 
-class Constant {
+export class Constant {
   value: boolean
-
-  singleIdentifier(): string {
-    return this.value ? '1' : '0'
-  }
-
   constructor(value: boolean) {
     this.value = value
   }
+
+  toString() {
+    return this.value ? '1' : '0'
+  }
+
+  reduce(): Expression {
+    return this
+  }
 }
 
-class Not {
+export class Not {
   expression: Expression
-
   constructor(expression: Expression) {
     this.expression = expression
   }
 
-  singleIdentifier(): string {
-    if (this.expression instanceof Variable) {
-      return `!(${this.expression.identifier})`
-    }
-    return this.expression.singleIdentifier()
-  }
-
-  simplifyPossibilities(): Expression[] {
-    const possibilities: Expression[] = [this]
-    // !0 = 1
+  reduce(): Expression {
     if (this.expression instanceof Constant) {
-      possibilities.push(new Constant(!this.expression.value))
+      return new Constant(!this.expression.value)
     }
-    // !!A = A
-    if (this.expression instanceof Variable) {
-      possibilities.push(new Variable(this.expression.identifier, !this.expression.isNegated))
-    }
-    // !!A = A
+
     if (this.expression instanceof Not) {
-      possibilities.push(this.expression.expression)
+      return this.expression.expression
     }
-    // !De Morgan's laws -> !(A . B) = !A + !B
     if (this.expression instanceof And) {
-      possibilities.push(new Or(...this.expression.expressions.map(expression => new Not(expression))))
-    }
-    // !De Morgan's laws -> !(A + B) = !A . !B
-    if (this.expression instanceof Or) {
-      possibilities.push(new And(...this.expression.expressions.map(expression => new Not(expression))))
-    }
-    return possibilities
-  }
-}
-
-class Or {
-  expressions: Expression[]
-
-  constructor(...expressions: Expression[]) {
-    this.expressions = expressions
-  }
-
-  singleIdentifier(): string {
-    return this.expressions.reduce((acc, expression) => {
-      if (expression instanceof Variable) {
-        return acc + expression.identifier
-      }
-      return acc + expression.singleIdentifier()
-    }, '')
-  }
-
-  simplifyPossibilities(): Expression[] {
-    for (const expression of this.expressions) {
-      if (expression instanceof Constant) {
-        if (expression.value) {
-          return [expression]
-        }
-      }
-    }
-    const possibilities: Expression[] = []
-    // A + B + C + D = (A + B) + (C + D) = (A + C) + (B + D) = (A + D) + (B + C)
-    if (this.expressions.length === 0) {
-      return [new Constant(false)]
-    }
-    // A = A
-    if (this.expressions.length === 1) {
-      if (this.expressions[0] instanceof Constant || this.expressions[0] instanceof Variable) {
-        return [this.expressions[0]]
-      }
-      return this.expressions[0].simplifyPossibilities()
-    }
-    if (this.expressions.length === 2) {
-      const left = this.expressions[0]
-      const right = this.expressions[1]
-      if (left instanceof Constant && right instanceof Constant) {
-        return [new Constant(left.value || right.value)]
-      }
-      if (left instanceof Variable && right instanceof Variable) {
-        if (left.identifier === right.identifier) {
-          if (left.isNegated === right.isNegated) {
-            return [left]
-          }
-          return [new Constant(true)]
-        }
-      }
-      if (left instanceof Variable && right instanceof Not) {
-        // A + !A = 1
-        if (right.expression instanceof Variable && left.identifier === right.expression.identifier) {
-          return [new Constant(true)]
-        }
-
-        // A + !B = !(A . B)
-        possibilities.push(new Not(new And(left, right.expression)))
-      } else if (left instanceof Not && right instanceof Variable) {
-        // !A + B = !(A . B)
-        if (left.expression instanceof Variable && left.expression.identifier === right.identifier) {
-          return [new Constant(true)]
-        }
-
-        // !A + B = !(A . B)
-        possibilities.push(new Not(new And(left.expression, right)))
-      }
-      if (left instanceof Constant) {
-        // A + 0 = A
-        if (left.value) {
-          return [left]
-        }
-        possibilities.push(right)
-      }
-
-      if (right instanceof Constant) {
-        // A + 1 = 1
-        if (right.value) {
-          return [right]
-        }
-        return [left]
-      }
-
-      if (left instanceof Variable && right instanceof And) {
-        // A + (B . C) = (A + B) . (A + C)
-        possibilities.push(new And(new Or(left, right.expressions[0]), new Or(left, right.expressions[1])))
-      } else if (left instanceof And && right instanceof Variable) {
-        // (A . B) + C = (A + C) . (B + C)
-        possibilities.push(new And(new Or(left.expressions[0], right), new Or(left.expressions[1], right)))
-      }
-
-      if (left instanceof Not && right instanceof Not) {
-        possibilities.push(new Not(new And(left.expression, right.expression)))
-      }
-
-      if (left instanceof Variable && right instanceof Or) {
-        // A + (A + B) = A + B
-        if (
-          right.expressions.some(
-            expression => expression instanceof Variable && expression.identifier === left.identifier
-          )
-        ) {
-          return [right]
-        }
-        // A + (B + C) = A + B + C
-        return new Or(left, ...right.expressions).simplifyPossibilities()
-      }
-    } else {
-      // A + B + C + D = (A + B) + (C + D) = (A + C) + (B + D) = (A + D) + (B + C) = ...
-      for (let i = 0; i < this.expressions.length; i++) {
-        const expression = this.expressions[i]
-        if (expression instanceof Constant) {
-          if (expression.value) {
-            return [expression]
-          }
-          continue
-        }
-        const pares: Expression[] = []
-        for (let j = i + 1; j < this.expressions.length; j++) {
-          const par = new Or(this.expressions[i], this.expressions[j])
-          pares.push(...par.simplifyPossibilities())
-        }
-        const paresPossibilities: Expression[] = new Or(...pares).simplifyPossibilities()
-        for (const par of paresPossibilities) {
-          if (par instanceof Constant) {
-            if (par.value) {
-              return [par]
+      if (this.expression.expressions.length === 2) {
+        const [left, right] = this.expression.expressions
+        if (left instanceof Not && right instanceof Not) {
+          if (left.expression instanceof And && right.expression instanceof And) {
+            if (left.toString() === right.toString()) {
+              // ~(~(A · B) · ~(A · B)) = A · B
+              return left.expression
+            }
+            // ~(~(A · A) · ~(B · B)) = A + B
+            const leftAnd = left.expression.expressions
+            const rightAnd = right.expression.expressions
+            if (leftAnd[0].toString() === leftAnd[1].toString() && rightAnd[0].toString() === rightAnd[1].toString()) {
+              return new Or(leftAnd[0], rightAnd[0])
             }
           }
+          return new And(left.expression, right.expression)
         }
-        possibilities.push(...paresPossibilities)
+        if (left instanceof Not) {
+          // ~(~(A · B) · C) = ~A + C
+          return new Or(left.expression, right)
+        }
+        if (right instanceof Not) {
+          // ~(A · ~(A · B)) = ~A + B
+          return new Or(left, right.expression)
+        }
+        // ~(A · B) = ~A + ~B
+        return new Or(new Not(left), new Not(right))
       }
     }
-    return possibilities
+    if (this.expression instanceof Or) {
+      if (this.expression.expressions.length === 2) {
+        const [left, right] = this.expression.expressions
+        // ~(~(A + B) + ~(A + B)) = A + B
+        if (left instanceof Not && right instanceof Not) {
+          return new Or(left.expression, right.expression)
+        }
+        if (left instanceof Not) {
+          // ~(~(A + B) + C) = ~A · C
+          return new And(left.expression, right)
+        }
+        if (right instanceof Not) {
+          // ~(A + ~(A + B)) = ~A · B
+          return new And(left, right.expression)
+        }
+        // ~(A + B) = ~A · ~B
+        return new And(new Not(left), new Not(right))
+      }
+    }
+    // ~(A·B) = ~A + ~B
+    if (this.expression instanceof And) {
+      return new Or(...this.expression.expressions.map(e => new Not(e)))
+    }
+    // ~(A + B) = ~A · ~B
+    if (this.expression instanceof Or) {
+      return new And(...this.expression.expressions.map(e => new Not(e)))
+    }
+
+    return this
   }
 
-  // simplifyPossibilities(): Expression[] {
-  //   const possibilities: Expression[] = [this]
-  //   if (this.left instanceof Constant && this.right instanceof Constant) {
-  //     possibilities.push(new Constant(this.left.value || this.right.value))
-  //   }
-  //   if (this.left instanceof Variable && this.right instanceof Variable) {
-  //     if (this.left.identifier === this.right.identifier) {
-  //       if (this.left.isNegated === this.right.isNegated) {
-  //         possibilities.push(this.left)
-  //       } else {
-  //         possibilities.push(new Constant(true))
-  //       }
-  //     }
-  //   }
-  //   if (this.left instanceof Variable && this.right instanceof And) {
-  //     // A + (B . C) = (A + B) . (A + C)
-  //     possibilities.push(new And(new Or(this.left, this.right.left), new Or(this.left, this.right.right)))
-  //   } else if (this.left instanceof And && this.right instanceof Variable) {
-  //     // (A . B) + C = (A + C) . (B + C)
-  //     possibilities.push(new And(new Or(this.left.left, this.right), new Or(this.left.right, this.right)))
-  //   }
-
-  //   if (this.left instanceof Constant) {
-  //     // A + 0 = A
-  //     if (this.left.value) {
-  //       possibilities.push(this.left)
-  //     } else {
-  //       possibilities.push(this.right)
-  //     }
-  //   }
-
-  //   if (this.right instanceof Constant) {
-  //     // A + 1 = 1
-  //     if (this.right.value) {
-  //       possibilities.push(this.right)
-  //     } else {
-  //       possibilities.push(this.left)
-  //     }
-  //   }
-
-  //   if (this.left instanceof Not && this.right instanceof Not) {
-  //     possibilities.push(new Not(new And(this.left.expression, this.right.expression)))
-  //   }
-
-  //   return possibilities
-  // }
+  toString(): string {
+    return `~(${this.expression.toString()})`
+  }
 }
 
-class And {
+export class And {
   expressions: Expression[]
 
   constructor(...expressions: Expression[]) {
     this.expressions = expressions
   }
 
-  singleIdentifier(): string {
-    return this.expressions.reduce((acc, expression) => {
-      if (expression instanceof Variable) {
-        return acc + expression.identifier
-      }
-      return acc + expression.singleIdentifier()
-    }, '')
+  toString(): string {
+    return `(${this.expressions.map(e => e.toString()).join(' · ')})`
   }
 
-  simplifyPossibilities(): Expression[] {
-    const possibilities: Expression[] = [this]
-    // A . B . C . D = (A . B) . (C . D) = (A . C) . (B . D) = (A . D) . (B . C)
-    if (this.expressions.length === 0) {
-      return [new Constant(true)]
-    }
-    // A = A
-    if (this.expressions.length === 1) {
-      if (this.expressions[0] instanceof Constant || this.expressions[0] instanceof Variable) {
-        return [this.expressions[0]]
-      }
-      return this.expressions[0].simplifyPossibilities()
-    }
+  reduce(): Expression {
     if (this.expressions.length === 2) {
-      const left = this.expressions[0]
-      const right = this.expressions[1]
-      if (left instanceof Constant && right instanceof Constant) {
-        possibilities.push(new Constant(left.value && right.value))
+      const [left, right] = this.expressions
+      // (A · A) = A
+      if (left.toString() === right.toString()) {
+        return left
       }
-      if (left instanceof Variable && right instanceof Variable) {
-        if (left.identifier === right.identifier) {
-          if (left.isNegated === right.isNegated) {
-            possibilities.push(left)
-          } else {
-            possibilities.push(new Constant(false))
-          }
-        }
+      // (A · ~A) = 0
+      if (left instanceof Not && left.expression.toString() === right.toString()) {
+        return new Constant(false)
       }
-      if (left instanceof Variable && right instanceof Or) {
-        // A . (B + C) = (A . B) + (A . C)
-        possibilities.push(new Or(new And(left, right.expressions[0]), new And(left, right.expressions[1])))
-      } else if (left instanceof Or && right instanceof Variable) {
-        // (A + B) . C = (A . C) + (B . C)
-        possibilities.push(new Or(new And(left.expressions[0], right), new And(left.expressions[1], right)))
+      // (~A · A) = 0
+      if (right instanceof Not && right.expression.toString() === left.toString()) {
+        return new Constant(false)
       }
-
-      if (left instanceof Constant) {
-        if (left.value) {
-          possibilities.push(right)
-        } else {
-          possibilities.push(left)
-        }
+      // (A · 1) = A
+      if (left instanceof Constant && left.value) {
+        return right
       }
-
-      if (right instanceof Constant) {
-        if (right.value) {
-          possibilities.push(left)
-        } else {
-          possibilities.push(right)
-        }
+      // (1 · A) = A
+      if (right instanceof Constant && right.value) {
+        return left
       }
-
-      if (left instanceof Not && right instanceof Not) {
-        possibilities.push(new Not(new Or(left.expression, right.expression)))
+      // (A · 0) = 0
+      if (left instanceof Constant && !left.value) {
+        return left
       }
-    } else {
-      // A . B . C . D = (A . B) . (C . D) = (A . C) . (B . D) = (A . D) . (B . C) = ...
-      const left = new And(...this.expressions.slice(0, this.expressions.length / 2))
-      const right = new And(...this.expressions.slice(this.expressions.length / 2))
-      possibilities.concat(new And(left, right).simplifyPossibilities())
+      // (0 · A) = 0
+      if (right instanceof Constant && !right.value) {
+        return right
+      }
     }
-    return possibilities
+
+    return this
   }
-
-  // simplifyPossibilities(): Expression[] {
-  //   const possibilities: Expression[] = [this]
-  //   if (this.left instanceof Constant && this.right instanceof Constant) {
-  //     possibilities.push(new Constant(this.left.value && this.right.value))
-  //   }
-  //   if (this.left instanceof Variable && this.right instanceof Variable) {
-  //     if (this.left.identifier === this.right.identifier) {
-  //       if (this.left.isNegated === this.right.isNegated) {
-  //         possibilities.push(this.left)
-  //       } else {
-  //         possibilities.push(new Constant(false))
-  //       }
-  //     }
-  //   }
-  //   if (this.left instanceof Variable && this.right instanceof Or) {
-  //     // A . (B + C) = (A . B) + (A . C)
-  //     possibilities.push(new Or(new And(this.left, this.right.left), new And(this.left, this.right.right)))
-  //   } else if (this.left instanceof Or && this.right instanceof Variable) {
-  //     // (A + B) . C = (A . C) + (B . C)
-  //     possibilities.push(new Or(new And(this.left.left, this.right), new And(this.left.right, this.right)))
-  //   }
-
-  //   if (this.left instanceof Constant) {
-  //     if (this.left.value) {
-  //       possibilities.push(this.right)
-  //     } else {
-  //       possibilities.push(this.left)
-  //     }
-  //   }
-
-  //   if (this.right instanceof Constant) {
-  //     if (this.right.value) {
-  //       possibilities.push(this.left)
-  //     } else {
-  //       possibilities.push(this.right)
-  //     }
-  //   }
-
-  //   if (this.left instanceof Not && this.right instanceof Not) {
-  //     possibilities.push(new Not(new Or(this.left.expression, this.right.expression)))
-  //   }
-
-  //   return possibilities
-  // }
 }
 
-export { And, Constant, Not, Or, Variable }
+export class Or {
+  expressions: Expression[]
+
+  constructor(...expressions: Expression[]) {
+    this.expressions = expressions
+  }
+
+  toString(): string {
+    return `(${this.expressions.map(e => e.toString()).join(' + ')})`
+  }
+
+  reduce(): Expression {
+    if (this.expressions.length === 2) {
+      const [left, right] = this.expressions
+      // (A + A) = A
+      if (left.toString() === right.toString()) {
+        return left
+      }
+      // (A + ~A) = 1
+      if (left instanceof Not && left.expression.toString() === right.toString()) {
+        return new Constant(true)
+      }
+      // (~A + A) = 1
+      if (right instanceof Not && right.expression.toString() === left.toString()) {
+        return new Constant(true)
+      }
+      // (A + 0) = A
+      if (left instanceof Constant && !left.value) {
+        return right
+      }
+      // (0 + A) = A
+      if (right instanceof Constant && !right.value) {
+        return left
+      }
+      // (A + 1) = 1
+      if (left instanceof Constant && left.value) {
+        return left
+      }
+      // (1 + A) = 1
+      if (right instanceof Constant && right.value) {
+        return right
+      }
+      // A + AB = A
+      if (left instanceof And && left.expressions.length === 2) {
+        const [leftLeft, leftRight] = left.expressions
+        if (leftLeft.toString() === right.toString()) {
+          return right
+        }
+        if (leftRight.toString() === right.toString()) {
+          return right
+        }
+      }
+      // AB + A = A
+      if (right instanceof And && right.expressions.length === 2) {
+        const [rightLeft, rightRight] = right.expressions
+        if (rightLeft.toString() === left.toString()) {
+          return left
+        }
+        if (rightRight.toString() === left.toString()) {
+          return left
+        }
+      }
+    }
+    return this
+  }
+}
+
+export class Xor {
+  left: Expression
+  right: Expression
+
+  constructor(left: Expression, right: Expression) {
+    this.left = left
+    this.right = right
+  }
+
+  toString(): string {
+    return `(${this.left.toString()} ⊕ ${this.right.toString()})`
+  }
+
+  toAndOr(): And | Or {
+    return new Or(new And(this.left, new Not(this.right)), new And(new Not(this.left), this.right))
+  }
+
+  reduce(): Expression {
+    return this.toAndOr().reduce()
+  }
+}
+
+export class NXor {
+  left: Expression
+  right: Expression
+
+  constructor(left: Expression, right: Expression) {
+    this.left = left
+    this.right = right
+  }
+
+  toString(): string {
+    return `~(${this.left.toString()} ⊕ ${this.right.toString()})`
+  }
+
+  toAndOr(): And | Or {
+    return new Or(new And(this.left, this.right), new And(new Not(this.left), new Not(this.right)))
+  }
+
+  reduce(): Expression {
+    return this.toAndOr().reduce()
+  }
+}
+
+/*
+3.5  Precedência entre Operadores 
+  As regras de precedência de operações são simples:
+    1. A negação de uma variável sempre avaliada primeiro;
+    2. Expressões Booleanas devem ser avaliadas preferencialmente da esquerda para a direita;
+    3. Negação de mais de uma variável avaliada apenas após a operação ou operações que estão sendo avaliadas;
+    4. As operações OU e E possuem a mesma ordem de precedência;
+    5. A ordem de avaliação pode ser alterada por meio da utilização de parênteses.
+Exemplo 3.3. 
+  ((ABC) + (~(A)~(BC)))⊕~(~(AD) + ~(D⊕A))
+  1. A·B
+  2. (A·B)·C
+  3. ~A
+  4. B·C
+  5. ~A·(B·C)
+  6. ((A·B)·C) + (~A·~(B·C))
+  7. A·D
+  8. ~(A·D)
+  9. A⊕D
+  10. ~(A⊕D)
+  11. ~(A·D) + ~(A⊕D)
+  12.(A·D) + (A⊕D)
+  13. ((ABC) + (~(A)~(BC)))⊕~(~(AD) + ~(D⊕A))
+*/
+
+export class FunctionBoolean {
+  expressions: Expression[]
+  constructor(...expressions: Expression[]) {
+    this.expressions = expressions
+  }
+
+  toString(): string {
+    return `(${this.expressions.map(e => e.toString()).join(' ')})`
+  }
+}
