@@ -7,7 +7,7 @@ describe('Boolean Algebra', () => {
     const or = new Or(new Variable('A'), new Constant(true))
     expect(or.toString()).toBe('(A + 1)')
   })
-  it('should be And of A + 1 = (A · 1)', () => {
+  it('should be And of A · 1 = (A · 1)', () => {
     const and = new And(new Variable('A'), new Constant(true))
     expect(and.toString()).toBe('(A · 1)')
   })
